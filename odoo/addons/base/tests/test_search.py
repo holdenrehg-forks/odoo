@@ -15,10 +15,11 @@ class test_search(TransactionCase):
         Partner = self.env['res.partner']
         c = Partner.create({'name': 'test_search_order_C'})
         d = Partner.create({'name': 'test_search_order_D', 'active': False})
-        a = Partner.create({'name': 'test_search_order_A'})
-        b = Partner.create({'name': 'test_search_order_B'})
-        ab = Partner.create({'name': 'test_search_order_AB'})
+        a = Partner.create({'name': 'test_search_order_A', 'ref': 'test_ref_A'})
+        b = Partner.create({'name': 'test_search_order_B', 'ref': 'test_ref_B'})
+        ab = Partner.create({'name': 'test_search_order_AB', 'ref': 'test_ref_AB'})
         e = Partner.create({'name': 'test_search_order_E', 'active': False})
+        self.env.cr.execute(f"UPDATE res_partner SET ref=NULL WHERE id IN ({c.id},{d.id},{e.id})")
 
         # The tests.
 
@@ -55,6 +56,49 @@ class test_search(TransactionCase):
         self.assertEqual([e, ab, b, a, d, c], list(id_desc_active_asc), "Search with 'ID DESC, ACTIVE ASC' order failed.")
         id_desc_active_desc = Partner.search([('name', 'like', 'test_search_order%'), '|', ('active', '=', True), ('active', '=', False)], order="id desc, active desc")
         self.assertEqual([e, ab, b, a, d, c], list(id_desc_active_desc), "Search with 'ID DESC, ACTIVE DESC' order failed.")
+
+        # The search tests relating to null value ordering, being either first
+        # or last. The null value ordering is controlled by passing either
+        # `nulls first` or `nulls last` into the `order` parameter on search().
+        #
+        # The expected scenarios and results for null value ordering are:
+        #
+        #     1. With no null direction, and no sort direction, NULL values will
+        #        not be prioritized. Some other factor such as primary key will
+        #        order and NULL values will be mixed throughout.
+        #        Ex. search([], order='column')
+        #     2. With no null direction, but a sort direction, NULL values will
+        #        be considered the smallest elements and ordered accordingly.
+        #        If DESC then NULL values are ordered first, and if ASC then
+        #        NULL values are ordered last.
+        #        Ex. search([], order='column asc|desc')
+        #     3. With a null direction, despite the sort direction, NULL values
+        #        will order will correspond with the direction given.
+        #        Ex. search([], order='column asc|desc nulls first|last')
+
+        default_nulls_asc = Partner.search([('name', 'like', 'test_search_order%')], order="ref asc")
+        self.assertEqual([a, ab, b, c], list(default_nulls_asc), "Search with 'REF ASC' order failed to order NULL values first.")
+        default_nulls_desc = Partner.search([('name', 'like', 'test_search_order%')], order="ref desc")
+        self.assertEqual([c, b, ab, a], list(default_nulls_desc), "Search with 'REF DESC' order failed to order NULL values first.")
+
+        nulls_first_asc = Partner.search([('name', 'like', 'test_search_order%')], order="ref asc nulls first")
+        self.assertEqual([c, a, ab, b], list(nulls_first_asc), "Search with 'REF ASC NULLS FIRST' order failed to order NULL values first.")
+        nulls_first_desc = Partner.search([('name', 'like', 'test_search_order%')], order="ref desc nulls first")
+        self.assertEqual([c, b, ab, a], list(nulls_first_desc), "Search with 'REF DESC NULLS FIRST' order failed to order NULL values first.")
+        no_sort_nulls_first = Partner.search([('name', 'like', 'test_search_order%')], order="ref nulls first")
+        self.assertEqual([c, a, ab, b], list(no_sort_nulls_first), "Search with 'REF NULLS FIRST' order failed to order NULL values first.")
+        active_nulls_first = Partner.search([('name', 'like', 'test_search_order%'), '|', ('active', '=', True), ('active', '=', False)], order="ref nulls first")
+        self.assertEqual([c, d, e, a, ab, b], list(active_nulls_first), "Search with 'REF NULL FIRST' order failed to order NULL values first.")
+
+        nulls_last_asc = Partner.search([('name', 'like', 'test_search_order%')], order="ref asc nulls last")
+        self.assertEqual([a, ab, b, c], list(nulls_last_asc), "Search with 'REF ASC NULLS LAST' order failed to order NULL values last.")
+        nulls_last_desc = Partner.search([('name', 'like', 'test_search_order%')], order="ref desc nulls last")
+        self.assertEqual([b, ab, a, c], list(nulls_last_desc), "Search with 'REF DESC NULLS LAST' order failed to order NULL values last.")
+        no_sort_nulls_last = Partner.search([('name', 'like', 'test_search_order%')], order="ref nulls last")
+        self.assertEqual([a, ab, b, c], list(no_sort_nulls_last), "Search with 'REF NULLS LAST' order failed to order NULL values last.")
+        active_nulls_last = Partner.search([('name', 'like', 'test_search_order%'), '|', ('active', '=', True), ('active', '=', False)], order="ref nulls last")
+        self.assertEqual([a, ab, b, c, d, e], list(active_nulls_last), "Search with 'REF NULL LAST' order failed to order NULL values last.")
+
 
     def test_10_inherits_m2order(self):
         Users = self.env['res.users']
